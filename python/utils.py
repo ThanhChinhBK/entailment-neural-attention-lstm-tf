@@ -1,4 +1,4 @@
-from gensim.models import word2vec as Word2Vec
+from gensim.models import KeyedVectors as Word2Vec
 import tensorflow as tf
 import pandas as pd
 import numpy as np
@@ -6,6 +6,7 @@ import os
 import sys
 import math
 from network import TensorFlowTrainable
+from SemEval2017.DataLoader import make_question_answer_pair
 
 
 def clean_sequence_to_words(sequence):
@@ -26,44 +27,34 @@ def clean_sequence_to_words(sequence):
 
 def load_data(data_dir="/disk2/datasets/snli/snli_1.0/", word2vec_path="/disk2/datasets/word2vec/GoogleNews-vectors-negative300.bin"):
 
-    print "\nLoading word2vec:"
+    print("\nLoading word2vec:")
     word2vec = {}
-    word2vec = Word2Vec.Word2Vec.load_word2vec_format(word2vec_path, binary=True)
-    print "word2vec: done"
+    word2vec = Word2Vec.load_word2vec_format(word2vec_path, binary=True)
+    print("word2vec: done")
 
     dataset = {}
-    print "\nLoading dataset:"
-    for type_set in ["train", "dev", "test"]: 
-        df = pd.read_csv(os.path.join(data_dir, "snli_1.0_{}.txt".format(type_set)), delimiter="\t")
-        dataset[type_set] = {"premises": df[["sentence1"]].values, "hypothesis": df[["sentence2"]].values, "targets": df[["gold_label"]].values}
+    print("\nLoading dataset:")
 
+    dataset["train"], dataset["dev"], _ =  make_question_answer_pair()
     tokenized_dataset = simple_preprocess(dataset=dataset, word2vec=word2vec)
-    print "dataset: done\n"
+    print("dataset: done\n")
     return word2vec, tokenized_dataset
 
 def simple_preprocess(dataset, word2vec):
     tokenized_dataset = dict((type_set, {"premises": [], "hypothesis": [], "targets": []}) for type_set in dataset)
-    print "tokenization:"
+    print("tokenization:")
     for type_set in dataset:
-        print "type_set:", type_set
-        map_targets = {"neutral": 0, "entailment": 1, "contradiction": 2}
-        num_ids = len(dataset[type_set]["targets"])
-        print "num_ids", num_ids
+        print("type_set:", type_set)
+        num_ids = len(dataset[type_set][2])
+        print("num_ids", num_ids)
         for i in range(num_ids):
-            try:
-                premises_tokens = [word for word in clean_sequence_to_words(dataset[type_set]["premises"][i][0])]
-                hypothesis_tokens = [word for word in clean_sequence_to_words(dataset[type_set]["hypothesis"][i][0])]
-                target = map_targets[dataset[type_set]["targets"][i][0]]
-            except:
-                pass
-            else:
-                tokenized_dataset[type_set]["premises"].append(premises_tokens)
-                tokenized_dataset[type_set]["hypothesis"].append(hypothesis_tokens)
-                tokenized_dataset[type_set]["targets"].append(target)
+            premises_tokens = [word for word in clean_sequence_to_words(dataset[type_set][i][0])]
+            hypothesis_tokens = [word for word in clean_sequence_to_words(dataset[type_set][i][1])]
+            target = dataset[type_set][i][2]
             sys.stdout.write("\rid: {}/{}      ".format(i + 1, num_ids))
             sys.stdout.flush()
-        print ""
-    print "tokenization: done"
+        print("")
+    print("tokenization: done")
     return tokenized_dataset
 
 
@@ -97,15 +88,30 @@ def train(word2vec, dataset, parameters):
 
         sess = tf.Session(config=config_proto)
 
-        premises_ph = tf.placeholder(tf.float32, shape=[parameters["sequence_length"], None, parameters["embedding_dim"]], name="premises")
-        hypothesis_ph = tf.placeholder(tf.float32, shape=[parameters["sequence_length"], None, parameters["embedding_dim"]], name="hypothesis")
+        premises_ph = tf.placeholder(tf.float32,
+                                     shape=[parameters["sequence_length"],
+                                            None,
+                                            parameters["embedding_dim"]],
+                                     name="premises")
+        hypothesis_ph = tf.placeholder(tf.float32,
+                                       shape=[parameters["sequence_length"],
+                                              None,
+                                              parameters["embedding_dim"]],
+                                       name="hypothesis")
         targets_ph = tf.placeholder(tf.int32, shape=[None], name="targets")
         keep_prob_ph = tf.placeholder(tf.float32, name="keep_prob")
 
         _projecter = TensorFlowTrainable()
-        projecter = _projecter.get_4Dweights(filter_height=1, filter_width=parameters["embedding_dim"], in_channels=1, out_channels=parameters["num_units"], name="projecter")
+        projecter = _projecter.get_4Dweights(filter_height=1,
+                                             filter_width=parameters["embedding_dim"],
+                                             in_channels=1,
+                                             out_channels=parameters["num_units"],
+                                             name="projecter")
 
-        optimizer = tf.train.AdamOptimizer(learning_rate=parameters["learning_rate"], name="ADAM", beta1=0.9, beta2=0.999)
+        optimizer = tf.train.AdamOptimizer(learning_rate=parameters["learning_rate"],
+                                           name="ADAM",
+                                           beta1=0.9,
+                                           beta2=0.999)
         
         with tf.variable_scope(name_or_scope="premise"):
             premise = RNN(cell=LSTMCell, num_units=parameters["num_units"], embedding_dim=parameters["embedding_dim"], projecter=projecter, keep_prob=keep_prob_ph)
@@ -137,7 +143,9 @@ def train(word2vec, dataset, parameters):
         sess.run(tf.initialize_all_variables())
         
         batcher = Batcher(word2vec=word2vec)
-        train_batches = batcher.batch_generator(dataset=dataset["train"], num_epochs=parameters["num_epochs"], batch_size=parameters["batch_size"]["train"], sequence_length=parameters["sequence_length"])
+        train_batches = batcher.batch_generator(
+            dataset=dataset["train"], num_epochs=parameters["num_epochs"],
+            batch_size=parameters["batch_size"]["train"], sequence_length=parameters["sequence_length"])
         num_step_by_epoch = int(math.ceil(len(dataset["train"]["targets"]) / parameters["batch_size"]["train"]))
         for train_step, (train_batch, epoch) in enumerate(train_batches):
             feed_dict = {
@@ -147,13 +155,20 @@ def train(word2vec, dataset, parameters):
                             keep_prob_ph: parameters["keep_prob"],
                         }
 
-            _, summary_str, train_loss, train_accuracy = sess.run([train_op, train_summary_op, loss, accuracy], feed_dict=feed_dict)
+            _, summary_str, train_loss, train_accuracy = sess.run(
+                [train_op, train_summary_op, loss, accuracy], feed_dict=feed_dict)
             train_summary_writer.add_summary(summary_str, train_step)
             if train_step % 100 == 0:
-                sys.stdout.write("\rTRAIN | epoch={0}/{1}, step={2}/{3} | loss={4:.2f}, accuracy={5:.2f}%   ".format(epoch + 1, parameters["num_epochs"], train_step % num_step_by_epoch, num_step_by_epoch, train_loss, 100. * train_accuracy))
+                sys.stdout.write("\rTRAIN | epoch={0}/{1}, step={2}/{3} | loss={4:.2f},accuracy={5:.2f}%   ".format(
+                    epoch + 1,
+                    parameters["num_epochs"],
+                    train_step % num_step_by_epoch, num_step_by_epoch, train_loss, 100. * train_accuracy))
                 sys.stdout.flush()
             if train_step % 5000 == 0:
-                test_batches = batcher.batch_generator(dataset=dataset["test"], num_epochs=1, batch_size=parameters["batch_size"]["test"], sequence_length=parameters["sequence_length"])
+                test_batches = batcher.batch_generator(dataset=dataset["dev"],
+                                                       num_epochs=1,
+                                                       batch_size=parameters["batch_size"]["test"],
+                                                       sequence_length=parameters["sequence_length"])
                 for test_step, (test_batch, _) in enumerate(test_batches):
                     feed_dict = {
                                     premises_ph: np.transpose(test_batch["premises"], (1, 0, 2)),
@@ -163,11 +178,11 @@ def train(word2vec, dataset, parameters):
                                 }
 
                     summary_str, test_loss, test_accuracy = sess.run([test_summary_op, loss, accuracy], feed_dict=feed_dict)
-                    print"\nTEST | loss={0:.2f}, accuracy={1:.2f}%   ".format(test_loss, 100. * test_accuracy)
-                    print ""
+                    prin("\nTEST | loss={0:.2f}, accuracy={1:.2f}%   ".format(test_loss, 100. * test_accuracy))
+                    print("")
                     test_summary_writer.add_summary(summary_str, train_step)
                     break
             if train_step % 5000 == 0:
                 saver.save(sess, save_path=savepath, global_step=train_step)
-        print ""
+        print("")
 

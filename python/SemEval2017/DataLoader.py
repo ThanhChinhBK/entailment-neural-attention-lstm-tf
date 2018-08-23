@@ -1,0 +1,236 @@
+import xml.etree.ElementTree as ElementTree
+from collections import defaultdict
+
+subtaskB_default_filepath = {
+    'SemEval2017/data/train/SemEval2016-Task3-CQA-QL-train-part1.xml':0,
+    'SemEval2017/data/train/SemEval2016-Task3-CQA-QL-train-part2.xml':0,
+    'SemEval2017/data/scorer_v2.3/SemEval2017-Task3-CQA-QL-dev.xml':1,
+    'SemEval2017/data/train/SemEval2016-Task3-CQA-QL-test.xml':0,
+    'SemEval2017/data/test/SemEval2017-task3-English-test.xml':2
+  }
+subtaskA_default_filepath = {
+  'SemEval2017/data/train/SemEval2016-Task3-CQA-QL-train-part1-subtaskA.xml':0,
+  'SemEval2017/data/train/SemEval2016-Task3-CQA-QL-train-part2-subtaskA.xml':0,
+  'SemEval2017/data/scorer_v2.3/SemEval2017-Task3-CQA-QL-dev-subtaskA.xml':1,
+  'SemEval2017/data/train/SemEval2016-Task3-CQA-QL-test-subtaskA.xml':0,
+  'SemEval2017/data/test/SemEval2017-task3-English-test-subtaskA.xml':2
+}
+
+QQ_LABELS = {
+  "PerfectMatch": 1,
+  "Relevant" : 1,
+  "Irrelevant": 0
+  }
+
+QA_LABELS = {
+  "Good" : 1,
+  "Bad" : 0,
+  "PotentiallyUseful": 0
+  }
+
+def load_all_corpus():
+  questions_dict = load()
+  all_data = []
+  for question in questions_dict:
+    all_data.append(questions_dict[question]['question'])
+    for rel_question_id in questions_dict[question]['related']:
+      all_data.append(questions_dict[question]['related'][rel_question_id]['question'])
+      for rel_comment_id in questions_dict[question]['related'][rel_question_id]['comments'].keys():
+        all_data.append(all_data.append(questions_dict[question]['related'][rel_question_id]['comments'][rel_comment_id]['comment']))
+  print("total num of sentences is :", len(all_data))
+  return all_data
+
+def parseTaskBTrainingData(filepath):
+  tree = ElementTree.parse(filepath)
+  root = tree.getroot()
+  OrgQuestions = {}
+  for OrgQuestion in root.iter('OrgQuestion'):
+    OrgQuestionOutput = {}
+    OrgQuestionOutput['id'] = OrgQuestion.attrib['ORGQ_ID']
+    OrgQuestionOutput['subject'] = OrgQuestion.find('OrgQSubject').text
+    OrgQuestionOutput['question'] = OrgQuestion.find('OrgQBody').text
+    OrgQuestionOutput['comments'] = {}
+    OrgQuestionOutput['related'] = {}
+    OrgQuestionOutput['featureVector'] = []
+    if OrgQuestionOutput['id'] not in OrgQuestions:
+      OrgQuestions[OrgQuestionOutput['id']] = OrgQuestionOutput
+    for RelQuestion in OrgQuestion.iter('RelQuestion'):
+      RelQuestionOutput = {}
+      RelQuestionOutput['id'] = RelQuestion.attrib['RELQ_ID']
+      RelQuestionOutput['subject'] = RelQuestion.find('RelQSubject').text
+      RelQuestionOutput['question'] = RelQuestion.find('RelQBody').text
+      RelQuestionOutput['givenRelevance'] = RelQuestion.attrib['RELQ_RELEVANCE2ORGQ']
+      RelQuestionOutput['givenRank'] = RelQuestion.attrib['RELQ_RANKING_ORDER']
+      RelQuestionOutput['comments'] = {}
+      RelQuestionOutput['featureVector'] = []
+      for RelComment in OrgQuestion.iter('RelComment'):
+        RelCommentOutput = {}
+        RelCommentOutput['id'] = RelComment.attrib['RELC_ID']
+        RelCommentOutput['date'] = RelComment.attrib['RELC_DATE']
+        RelCommentOutput['username'] = RelComment.attrib['RELC_USERNAME']
+        RelCommentOutput['comment'] = RelComment.find('RelCText').text
+        RelCommentOutput['givenRelevance'] = RelComment.attrib['RELC_RELEVANCE2RELQ']
+        if RelCommentOutput['comment'] == None:
+          RelCommentOutput['comment'] = ""
+        RelQuestionOutput['comments'][RelCommentOutput['id']] = RelCommentOutput
+      #if RelQuestionOutput['question'] != None:
+      if RelQuestionOutput['question'] == None:
+        RelQuestionOutput['question'] = ""
+      OrgQuestions[OrgQuestionOutput['id']]['related'][RelQuestionOutput['id']] = RelQuestionOutput
+      #else:
+      #print("Warning: skipping empty question " + RelQuestionOutput['id'])
+  return OrgQuestions
+
+def load_questions(filenames):
+  output = {}
+  for filePath in filenames:
+    print("\nParsing %s" % filePath)
+    fileoutput = parseTaskBTrainingData(filePath)
+    print("  Got %s primary questions" % len(fileoutput))
+    if not len(fileoutput):
+      raise Exception("Failed to load any entries from " + filePath)
+    isTraining = subtaskB_default_filepath[filePath]
+    for q in fileoutput:
+      fileoutput[q]['isTraining'] = isTraining
+    output.update(fileoutput)
+  print("\nTotal of %s entries" % len(output))
+  return output
+
+def parseTaskATrainingData(filepath):
+  # construc the Element Tree and get the root
+  tree = ElementTree.parse(filepath)
+  root = tree.getroot()
+  # create a list to store the pulled threads
+  threadList = {}
+  # find each thread in the tree, starting at the root
+  for Thread in root.findall('Thread'):
+    # create a dict for each question
+    QuestionDict = {}
+    # find each question
+    relQuestion = Thread.find('RelQuestion')
+    #Pull the values from the questions into the relevant fields of the question dict
+    QuestionDict['threadId'] = relQuestion.attrib['RELQ_ID']
+    QuestionDict['subject'] = relQuestion.find('RelQSubject').text
+    QuestionDict['question'] = QuestionDict['subject'] + " " + relQuestion.find('RelQBody').text if relQuestion.find('RelQBody').text else  QuestionDict['subject']
+    QuestionDict['category'] = relQuestion.attrib['RELQ_CATEGORY']
+    QuestionDict['username'] = relQuestion.attrib['RELQ_USERNAME']
+    comments = {}
+    # Pull the comments from the filepath
+    for relComment in Thread.findall('RelComment'):
+      #create a dict for the comment
+      commentDict = {}
+      #populate the comment dict
+      commentDict['comment'] = relComment.find('RelCText').text
+      commentDict['comment_id'] = relComment.attrib['RELC_ID']
+      commentDict['givenRelevance'] = relComment.attrib['RELC_RELEVANCE2RELQ']
+      comments[commentDict['comment_id']] =  commentDict
+      # set the comments key to be equal to the question's comments
+      QuestionDict['comments'] = comments
+        #put the comments into the Question object
+      if type(QuestionDict['question']) is str :
+        threadList[QuestionDict['threadId']] = QuestionDict
+      else:
+        print("  Warning: skipping question %s with no question text" % QuestionDict['threadId'])
+  return threadList
+
+def load_questions_answers(filenames):
+  output = {}
+  for filePath in filenames:
+    print("\nParsing %s" % filePath)
+    fileoutput = parseTaskATrainingData(filePath)
+    print("  Got %s primary questions" % len(fileoutput))
+    if not len(fileoutput):
+      raise Exception("Failed to load any entries from " + filePath)
+    isTraining = subtaskA_default_filepath[filePath]
+    for q in fileoutput:
+      fileoutput[q]['isTraining'] = isTraining
+    output.update(fileoutput)
+  print("\nTotal of %s entries" % len(output))
+  return output
+
+def make_question_pair():
+  questions_dict = load_questions(subtaskB_default_filepath)
+  train_set, dev_set, test_set = [], [], []
+  for question in questions_dict:
+    orig_question = questions_dict[question]['question']
+    for rel_question_id in questions_dict[question]['related']:
+      rel_question = questions_dict[question]['related'][rel_question_id]['question']
+      label = QQ_LABELS[questions_dict[question]['related'][rel_question_id]['givenRelevance']]
+      #label = 1 / int(questions_dict[question]['related'][rel_question_id]['givenRank'])
+      if questions_dict[question]['isTraining'] == 0:
+        train_set.append([orig_question, rel_question, label])
+      elif questions_dict[question]['isTraining'] == 1:
+        dev_set.append([orig_question, rel_question, label])
+      else:
+        test_set.append([orig_question, rel_question, label])
+  return train_set, dev_set, test_set
+
+def make_question_answer_pair1():
+  thread_dict = load_questions_answers(subtaskA_default_filepath)
+  train_set, dev_set, test_set = [], [], []
+  for threadId in thread_dict:
+    rel_question = thread_dict[threadId]['question']
+    for cmt_id in thread_dict[threadId]['comments']:
+      rel_comment = thread_dict[threadId]['comments'][cmt_id]['comment']
+      label = QA_LABELS[thread_dict[threadId]['comments'][cmt_id]['givenRelevance']]
+        #label = 1 / int(questions_dict[question]['related'][rel_question_id]['givenRank'])
+      if thread_dict[threadId]['isTraining'] == 0:
+        train_set.append([rel_question, rel_comment, label])
+      elif thread_dict[threadId]['isTraining'] == 1:
+        dev_set.append([rel_question, rel_comment, label])
+      else:
+        test_set.append([rel_question, rel_comment, label])
+  return train_set, dev_set, test_set
+
+def make_question_answer_pair2():
+  questions_dict = load_questions(subtaskB_default_filepath)
+  train_set, dev_set, test_set = [], [], []
+  for question in questions_dict:
+    for rel_question_id in questions_dict[question]['related']:
+      rel_question = questions_dict[question]['related'][rel_question_id]['question']
+      for rel_cmt_id in questions_dict[question]['related'][rel_question_id]['comments']:
+        rel_comment = questions_dict[question]['related'][rel_question_id]['comments'][rel_cmt_id]['comment']
+        label = QA_LABELS[questions_dict[question]['related'][rel_question_id]['comments'][rel_cmt_id]['givenRelevance']]
+        #label = 1 / int(questions_dict[question]['related'][rel_question_id]['givenRank'])
+        if questions_dict[question]['isTraining'] == 0:
+          train_set.append([rel_question, rel_comment, label])
+        elif questions_dict[question]['isTraining'] == 1:
+          dev_set.append([rel_question, rel_comment, label])
+        else:
+          test_set.append([rel_question, rel_comment, label])
+  return train_set, dev_set, test_set
+
+def make_question_answer_pair():
+  train_set1, dev_set1, test_set1 = make_question_answer_pair1()
+  train_set2, dev_set2, test_set2 = make_question_answer_pair2()
+  train_set, dev_set, test_set = train_set1 + train_set2, dev_set1 + dev_set2, test_set1
+  print("Total of {} in train set, {} in dev set and  {} in test set".format(len(train_set), len(dev_set), len(test_set)))
+  return train_set, dev_set, test_set
+
+def get_test_set_taskB():
+  test_path = "SemEval2017/data/test/SemEval2017-task3-English-test-input.xml"
+  #test_path = 'SemEval2017/data/train/SemEval2016-Task3-CQA-QL-test.xml'
+  sent_pair_dict = defaultdict(list)
+  all_question = {}
+  questions_dict = parseTaskBTrainingData(test_path)
+  for question in questions_dict:
+    all_question[question] = questions_dict[question]['question']
+    for rel_question_id in questions_dict[question]['related']:
+      rel_question = questions_dict[question]['related'][rel_question_id]['question']
+      all_question[rel_question_id] = rel_question
+      sent_pair_dict[question].append(rel_question_id)
+  return sent_pair_dict, all_question
+
+def get_test_set_taskA():
+  #test_path = 'SemEval2017/data/train/SemEval2016-Task3-CQA-QL-test-subtaskA.xml';
+  test_path = 'SemEval2017/data/test/SemEval2017-task3-English-test-subtaskA.xml'
+  sent_pair_dict = defaultdict(list)
+  all_sents = {}
+  questions_dict = parseTaskATrainingData(test_path)
+  for question in questions_dict:
+    all_sents[question] = questions_dict[question]['question']
+    for rel_cmt_id in questions_dict[question]['comments']:
+      rel_cmt = questions_dict[question]['comments'][rel_cmt_id]['comment']
+      all_sents[rel_cmt_id] = rel_cmt
+      sent_pair_dict[question].append(rel_cmt_id)
+  return sent_pair_dict, all_sents

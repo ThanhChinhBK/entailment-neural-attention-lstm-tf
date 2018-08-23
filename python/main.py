@@ -47,8 +47,8 @@ if __name__ == "__main__":
                     "weight_decay": args.weight_decay,
                 }
 
-    for key, parameter in parameters.iteritems():
-        print "{}: {}".format(key, parameter)
+    for key, parameter in parameters.items():
+        print("{}: {}".format(key, parameter))
 
     # MAIN
     word2vec, dataset = load_data(data_dir=args.data_dir, word2vec_path=args.word2vec_path)
