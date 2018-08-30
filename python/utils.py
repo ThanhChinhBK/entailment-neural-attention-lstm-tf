@@ -45,12 +45,15 @@ def simple_preprocess(dataset, word2vec):
     print("tokenization:")
     for type_set in dataset:
         print("type_set:", type_set)
-        num_ids = len(dataset[type_set][2])
+        num_ids = len(dataset[type_set])
         print("num_ids", num_ids)
         for i in range(num_ids):
             premises_tokens = [word for word in clean_sequence_to_words(dataset[type_set][i][0])]
             hypothesis_tokens = [word for word in clean_sequence_to_words(dataset[type_set][i][1])]
             target = dataset[type_set][i][2]
+            tokenized_dataset[type_set]['premises'].append(premises_tokens)
+            tokenized_dataset[type_set]['hypothesis'].append(hypothesis_tokens)
+            tokenized_dataset[type_set]['targets'].append(target)
             sys.stdout.write("\rid: {}/{}      ".format(i + 1, num_ids))
             sys.stdout.flush()
         print("")
@@ -145,9 +148,13 @@ def train(word2vec, dataset, parameters):
         batcher = Batcher(word2vec=word2vec)
         train_batches = batcher.batch_generator(
             dataset=dataset["train"], num_epochs=parameters["num_epochs"],
-            batch_size=parameters["batch_size"]["train"], sequence_length=parameters["sequence_length"])
+            batch_size=parameters["batch_size"]["train"],
+            sequence_length=parameters["sequence_length"]
+        )
         num_step_by_epoch = int(math.ceil(len(dataset["train"]["targets"]) / parameters["batch_size"]["train"]))
+        print("before training: list batch:", list(train_batches))
         for train_step, (train_batch, epoch) in enumerate(train_batches):
+            print(train_step)
             feed_dict = {
                             premises_ph: np.transpose(train_batch["premises"], (1, 0, 2)),
                             hypothesis_ph: np.transpose(train_batch["hypothesis"], (1, 0, 2)),
@@ -158,7 +165,7 @@ def train(word2vec, dataset, parameters):
             _, summary_str, train_loss, train_accuracy = sess.run(
                 [train_op, train_summary_op, loss, accuracy], feed_dict=feed_dict)
             train_summary_writer.add_summary(summary_str, train_step)
-            if train_step % 100 == 0:
+            if train_step % 1 == 0:
                 sys.stdout.write("\rTRAIN | epoch={0}/{1}, step={2}/{3} | loss={4:.2f},accuracy={5:.2f}%   ".format(
                     epoch + 1,
                     parameters["num_epochs"],

@@ -17,7 +17,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--train", action="store_true", help="active this flag to train the model")
     parser.add_argument("--data_dir", default=os.path.join(DATA_DIR, "dataset"), help="path to the SNLI dataset directory")
-    parser.add_argument("--word2vec_path", default=os.path.join(DATA_DIR, "GoogleNews-vectors-negative300.bin"), help="path to the pretrained Word2Vect .bin file")
+    parser.add_argument("--word2vec_path",
+                        default=os.path.join(DATA_DIR, "GoogleNews-vectors-negative300.bin"),
+                        help="path to the pretrained Word2Vect .bin file")
     parser.add_argument("--model_name", type=str, default="attention_lstm")
     parser.add_argument("--learning_rate", type=float, default=0.001)
     parser.add_argument("--weight_decay", type=float, default=0.)
@@ -28,7 +30,9 @@ if __name__ == "__main__":
     parser.add_argument("--gpu", type=str, default="0", help="set gpu to '' to use CPU mode")
     parser.add_argument("--num_epochs", type=int, default=45)
     parser.add_argument("--embedding_dim", type=int, default=300, help="Word2Vec dimension")
-    parser.add_argument("--sequence_length", type=int, default=20, help="final length of each sequence (premise and hypothesis), padded with null-words if needed")
+    parser.add_argument("--sequence_length",
+                        type=int, default=20,
+                        help="final length of each sequence (premise and hypothesis), padded with null-words if needed")
     parser.add_argument("--num_units", type=int, default=100, help="LSTM output dimension (k in the original paper)")
     args = parser.parse_args()
 
@@ -53,5 +57,5 @@ if __name__ == "__main__":
     # MAIN
     word2vec, dataset = load_data(data_dir=args.data_dir, word2vec_path=args.word2vec_path)
 
-    if args.train:
-        train(word2vec=word2vec, dataset=dataset, parameters=parameters)
+    
+    train(word2vec=word2vec, dataset=dataset, parameters=parameters)
